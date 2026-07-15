@@ -1,4 +1,7 @@
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+$script:MutexCreated = $false
+$script:AppMutex = New-Object System.Threading.Mutex($true, 'Local\CodexUsageFloat', [ref]$script:MutexCreated)
+if (-not $script:MutexCreated) { exit 0 }
 Add-Type @'
 using System;
 using System.Diagnostics;
@@ -222,7 +225,7 @@ $card.ContextMenu = $menu
 
 $window.Add_MouseLeftButtonDown({ if ($_.ClickCount -eq 2) { Toggle-Compact } else { $window.DragMove() } })
 $window.Add_MouseLeftButtonUp({ Save-Config })
-$window.Add_Closing({ Save-Config })
+$window.Add_Closing({ Save-Config; if ($script:MutexCreated) { $script:AppMutex.ReleaseMutex() } })
 
 $config = Read-Config
 $window.Add_Loaded({
