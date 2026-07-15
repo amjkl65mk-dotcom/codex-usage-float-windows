@@ -11,6 +11,13 @@ public static class CodexWindowState {
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hWnd, int index);
+    [DllImport("user32.dll")] static extern int SetWindowLong(IntPtr hWnd, int index, int value);
+    public static void MakeNoActivate(IntPtr hWnd) {
+        const int GWL_EXSTYLE = -20;
+        const int WS_EX_NOACTIVATE = 0x08000000;
+        SetWindowLong(hWnd, GWL_EXSTYLE, GetWindowLong(hWnd, GWL_EXSTYLE) | WS_EX_NOACTIVATE);
+    }
     static bool IsCodexProcess(uint pid) {
         try {
             var name = Process.GetProcessById((int)pid).ProcessName;
@@ -62,6 +69,7 @@ $script:FollowCodex = $true
 $script:CodexVisible = $true
 
 function Get-LatestUsage {
+    $newest = $null
     $folders = @((Join-Path $script:CodexHome 'sessions'), (Join-Path $script:CodexHome 'archived_sessions'))
     $files = foreach ($folder in $folders) {
         if (Test-Path -LiteralPath $folder) { Get-ChildItem -LiteralPath $folder -Filter '*.jsonl' -File -Recurse -ErrorAction SilentlyContinue }
@@ -74,16 +82,23 @@ function Get-LatestUsage {
                 $row = $lines[$i] | ConvertFrom-Json
                 $limits = $row.payload.rate_limits
                 if ($null -ne $limits.primary.used_percent) {
-                    return [pscustomobject]@{
+                    $observed = $file.LastWriteTimeUtc
+                    if ($row.timestamp) {
+                        try { $observed = [DateTimeOffset]::Parse($row.timestamp).UtcDateTime } catch { }
+                    }
+                    $candidate = [pscustomobject]@{
                         Remaining = [math]::Max(0, [math]::Min(100, 100 - [double]$limits.primary.used_percent))
                         ResetsAt = if ($limits.primary.resets_at) { [long]$limits.primary.resets_at } else { $null }
                         Plan = if ($limits.plan_type) { $limits.plan_type.ToString().ToUpper() } else { 'CHATGPT' }
+                        Observed = $observed
                     }
+                    if ($null -eq $newest -or $candidate.Observed -gt $newest.Observed) { $newest = $candidate }
+                    break
                 }
             } catch { }
         }
     }
-    return $null
+    return $newest
 }
 
 function Read-Config {
@@ -99,7 +114,7 @@ function Save-Config {
 }
 
 [xml]$xaml = @'
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" WindowStyle="None" AllowsTransparency="True" Background="Transparent" Topmost="True" ShowInTaskbar="False" SizeToContent="WidthAndHeight">
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" WindowStyle="None" AllowsTransparency="True" Background="Transparent" Topmost="True" ShowActivated="False" ShowInTaskbar="False" SizeToContent="WidthAndHeight">
   <Border Name="Card" Background="#EE111827" CornerRadius="11" Padding="11,8" SnapsToDevicePixels="True" BorderThickness="1" BorderBrush="#263244">
     <StackPanel>
       <DockPanel Width="126">
@@ -211,6 +226,8 @@ $window.Add_Closing({ Save-Config })
 
 $config = Read-Config
 $window.Add_Loaded({
+    $handle = (New-Object System.Windows.Interop.WindowInteropHelper -ArgumentList $window).Handle
+    [CodexWindowState]::MakeNoActivate($handle)
     if ($null -ne $config.x) { $window.Left = [double]$config.x } else { $window.Left = [SystemParameters]::WorkArea.Right - $window.ActualWidth - 24 }
     $window.Top = if ($null -ne $config.y) { [double]$config.y } else { 36 }
     if ($config.PSObject.Properties.Name -contains 'theme') { Set-Theme $config.theme }
