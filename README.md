@@ -28,11 +28,13 @@ powershell -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create([IO.File]:
 
 - 拖动：按住悬浮窗移动
 - Codex 窗口最小化或关闭时，悬浮窗同步隐藏；恢复 Codex 后自动出现
-- 双击：切换普通/紧凑模式
-- 右键：刷新、切换深色/浅色/蓝色/半透明外观，或关闭“跟随 Codex 显示”
+- 双击：切换普通/简洁模式；简洁模式仅显示百分比
+- 右键：刷新、切换苹果浅色/深色/淡蓝外观，或关闭“跟随 Codex 显示”
 - 颜色：绿色 > 40%，黄色 20–40%，红色 ≤ 20%
 
 位置、显示模式、主题和跟随设置会保存在 `%APPDATA%\CodexUsageFloat\config.json`。
+
+界面使用 Windows 11 DWM 原生圆角、系统阴影与抗锯齿边缘；普通模式约 `132×58`，简洁模式约 `58×30`。
 
 `app.py` 是相同功能的 Python/Tkinter 版本，适合已有完整 Python 环境时二次开发；日常使用请直接运行 `start.bat`。
 

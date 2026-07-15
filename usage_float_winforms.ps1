@@ -7,14 +7,16 @@ Add-Type -ReferencedAssemblies System.Windows.Forms,System.Drawing @'
 using System;
 using System.Diagnostics;
 using System.Drawing;
-using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 public class UsageForm : Form {
     protected override bool ShowWithoutActivation { get { return true; } }
     protected override CreateParams CreateParams { get { var p=base.CreateParams; p.ExStyle|=0x08000000; return p; } }
-    protected override void OnResize(EventArgs e) { base.OnResize(e); using(var p=new GraphicsPath()){int r=Math.Min(14,Math.Min(Width,Height)/2);p.AddArc(0,0,r*2,r*2,180,90);p.AddArc(Width-r*2-1,0,r*2,r*2,270,90);p.AddArc(Width-r*2-1,Height-r*2-1,r*2,r*2,0,90);p.AddArc(0,Height-r*2-1,r*2,r*2,90,90);p.CloseFigure();Region=new Region(p);}}
-    protected override void OnPaint(PaintEventArgs e) { base.OnPaint(e); e.Graphics.SmoothingMode=SmoothingMode.AntiAlias; using(var p=new Pen(Color.FromArgb(40,90,90,90))){e.Graphics.DrawRectangle(p,0,0,Width-1,Height-1);}}
+    protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); NativeStyle.Apply(Handle, 0x00D7D2D2); }
+}
+public static class NativeStyle {
+    [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int a, ref int v, int s);
+    public static void Apply(IntPtr h, int borderColor) { int corner=2; DwmSetWindowAttribute(h,33,ref corner,4); DwmSetWindowAttribute(h,34,ref borderColor,4); }
 }
 public static class CodexWindows {
     delegate bool EnumProc(IntPtr h, IntPtr l);
@@ -50,23 +52,23 @@ function Read-Config {try{return Get-Content $configFile -Raw -Encoding UTF8|Con
 function Save-Config {New-Item $configDir -ItemType Directory -Force|Out-Null;@{x=$form.Left;y=$form.Top;theme=$script:theme;followCodex=$script:follow;compact=$script:compact}|ConvertTo-Json|Set-Content $configFile -Encoding UTF8}
 
 $form=New-Object UsageForm
-$form.FormBorderStyle='None';$form.ShowInTaskbar=$false;$form.TopMost=$true;$form.Size=New-Object Drawing.Size(148,68);$form.StartPosition='Manual';$form.Padding=New-Object Windows.Forms.Padding(1)
-$title=New-Object Windows.Forms.Label;$title.SetBounds(10,7,70,17);$title.Font=New-Object Drawing.Font('Segoe UI',7.5,[Drawing.FontStyle]::Bold);$title.Text='CODEX'
-$value=New-Object Windows.Forms.Label;$value.SetBounds(75,3,63,25);$value.TextAlign='MiddleRight';$value.Font=New-Object Drawing.Font('Segoe UI',15,[Drawing.FontStyle]::Bold);$value.Text='--%'
-$track=New-Object Windows.Forms.Panel;$track.SetBounds(11,31,126,4)
-$bar=New-Object Windows.Forms.Panel;$bar.SetBounds(0,0,0,4);$track.Controls.Add($bar)
-$detail=New-Object Windows.Forms.Label;$detail.SetBounds(10,40,130,20);$detail.Font=New-Object Drawing.Font('Segoe UI',7.5);$detail.Text='Reading...'
+$form.FormBorderStyle='None';$form.ShowInTaskbar=$false;$form.TopMost=$true;$form.Size=New-Object Drawing.Size(132,58);$form.StartPosition='Manual'
+$title=New-Object Windows.Forms.Label;$title.SetBounds(10,6,68,16);$title.Font=New-Object Drawing.Font('Segoe UI Variable Text',7.2,[Drawing.FontStyle]::Bold);$title.Text='CODEX'
+$value=New-Object Windows.Forms.Label;$value.SetBounds(76,3,47,22);$value.TextAlign='MiddleRight';$value.Font=New-Object Drawing.Font('Segoe UI Variable Display',13,[Drawing.FontStyle]::Bold);$value.Text='--%'
+$track=New-Object Windows.Forms.Panel;$track.SetBounds(10,27,112,3)
+$bar=New-Object Windows.Forms.Panel;$bar.SetBounds(0,0,0,3);$track.Controls.Add($bar)
+$detail=New-Object Windows.Forms.Label;$detail.SetBounds(10,34,112,16);$detail.Font=New-Object Drawing.Font('Segoe UI Variable Text',7.2);$detail.Text='正在读取…'
 $form.Controls.AddRange(@($title,$value,$track,$detail))
 
-function Set-Theme($name){$script:theme=$name;switch($name){'light'{$form.BackColor='#FAFAFA';$title.ForeColor='#86868B';$detail.ForeColor='#86868B';$track.BackColor='#E5E5EA'}'blue'{$form.BackColor='#EAF3FF';$title.ForeColor='#56708F';$detail.ForeColor='#56708F';$track.BackColor='#D1E5FF'}'glass'{$form.BackColor='#F5F5F7';$form.Opacity=.86;$title.ForeColor='#6E6E73';$detail.ForeColor='#6E6E73';$track.BackColor='#D2D2D7'}default{$form.BackColor='#1D1D1F';$form.Opacity=.96;$title.ForeColor='#A1A1A6';$detail.ForeColor='#A1A1A6';$track.BackColor='#3A3A3C'}};if($name -ne 'glass'){$form.Opacity=1};$form.Invalidate();Save-Config}
-function Set-Compact([bool]$enabled){$script:compact=$enabled;if($enabled){$title.Visible=$false;$track.Visible=$false;$detail.Visible=$false;$form.Size=New-Object Drawing.Size(56,30);$value.SetBounds(3,1,50,27);$value.TextAlign='MiddleCenter';$value.Font=New-Object Drawing.Font('Segoe UI',11,[Drawing.FontStyle]::Bold)}else{$form.Size=New-Object Drawing.Size(148,68);$title.Visible=$true;$track.Visible=$true;$detail.Visible=$true;$value.SetBounds(75,3,63,25);$value.TextAlign='MiddleRight';$value.Font=New-Object Drawing.Font('Segoe UI',15,[Drawing.FontStyle]::Bold)};$form.Invalidate();Save-Config}
-function Update-Usage {$u=Get-LatestUsage;if($u){$n=[double]$u.Remaining;$color=if($n -gt 40){'#34D399'}elseif($n -gt 20){'#FBBF24'}else{'#F87171'};$value.Text=('{0:N0}%' -f $n);$value.ForeColor=$color;$bar.BackColor=$color;$bar.Width=[int](126*$n/100);$title.Text="CODEX $($u.Plan)";if($u.Reset){$reset=[DateTimeOffset]::FromUnixTimeSeconds([long]$u.Reset).LocalDateTime;$span=$reset-[datetime]::Now;if($span.TotalSeconds -lt 0){$span=[timespan]::Zero};$detail.Text=if($span.Days -gt 0){"$($span.Days)d $($span.Hours)h until reset"}elseif($span.Hours -gt 0){"$($span.Hours)h $($span.Minutes)m until reset"}else{"$($span.Minutes)m until reset"}}}else{$value.Text='--%';$detail.Text='Send a Codex message first'}}
-function Update-Visibility {$interaction=$form.ClientRectangle.Contains($form.PointToClient([Windows.Forms.Cursor]::Position)) -or $menu.Visible;$show=(-not $script:follow) -or (([CodexWindows]::HasVisibleWindow()) -and ([CodexWindows]::IsForeground())) -or $interaction;if($show -ne $script:visibleState){$script:visibleState=$show;if($show){$form.Opacity=if($script:theme -eq 'glass'){.78}else{1};$form.Enabled=$true;$form.TopMost=$false;$form.TopMost=$true}else{$form.Opacity=0;$form.Enabled=$false}}}
+function Set-Theme($name){$script:theme=$name;switch($name){'light'{$form.BackColor='#F5F5F7';$title.ForeColor='#6E6E73';$detail.ForeColor='#6E6E73';$track.BackColor='#D2D2D7';[NativeStyle]::Apply($form.Handle,0x00D7D2D2)}'blue'{$form.BackColor='#EDF5FF';$title.ForeColor='#536A86';$detail.ForeColor='#536A86';$track.BackColor='#CADCF2';[NativeStyle]::Apply($form.Handle,0x00F2DCCA)}default{$form.BackColor='#1D1D1F';$title.ForeColor='#A1A1A6';$detail.ForeColor='#A1A1A6';$track.BackColor='#3A3A3C';[NativeStyle]::Apply($form.Handle,0x003C3A3A)}};$form.Opacity=1;$form.Invalidate();Save-Config}
+function Set-Compact([bool]$enabled){$script:compact=$enabled;if($enabled){$title.Visible=$false;$track.Visible=$false;$detail.Visible=$false;$form.Size=New-Object Drawing.Size(58,30);$value.SetBounds(2,1,54,27);$value.TextAlign='MiddleCenter';$value.Font=New-Object Drawing.Font('Segoe UI Variable Display',11,[Drawing.FontStyle]::Bold)}else{$form.Size=New-Object Drawing.Size(132,58);$title.Visible=$true;$track.Visible=$true;$detail.Visible=$true;$value.SetBounds(76,3,47,22);$value.TextAlign='MiddleRight';$value.Font=New-Object Drawing.Font('Segoe UI Variable Display',13,[Drawing.FontStyle]::Bold)};$form.Invalidate();Save-Config}
+function Update-Usage {$u=Get-LatestUsage;if($u){$n=[double]$u.Remaining;$color=if($n -gt 40){'#30A46C'}elseif($n -gt 20){'#E8930C'}else{'#D92D20'};$value.Text=('{0:N0}%' -f $n);$value.ForeColor=$color;$bar.BackColor=$color;$bar.Width=[int](112*$n/100);$title.Text="CODEX $($u.Plan)";if($u.Reset){$reset=[DateTimeOffset]::FromUnixTimeSeconds([long]$u.Reset).LocalDateTime;$span=$reset-[datetime]::Now;if($span.TotalSeconds -lt 0){$span=[timespan]::Zero};$detail.Text=if($span.Days -gt 0){"$($span.Days)天 $($span.Hours)小时后重置"}elseif($span.Hours -gt 0){"$($span.Hours)小时 $($span.Minutes)分后重置"}else{"$($span.Minutes)分钟后重置"}}}else{$value.Text='--%';$detail.Text='请先在 Codex 发送消息'}}
+function Update-Visibility {$interaction=$form.ClientRectangle.Contains($form.PointToClient([Windows.Forms.Cursor]::Position)) -or $menu.Visible;$show=(-not $script:follow) -or (([CodexWindows]::HasVisibleWindow()) -and ([CodexWindows]::IsForeground())) -or $interaction;if($show -ne $script:visibleState){$script:visibleState=$show;if($show){$form.Opacity=1;$form.Enabled=$true;$form.TopMost=$false;$form.TopMost=$true}else{$form.Opacity=0;$form.Enabled=$false}}}
 
 $menu=New-Object Windows.Forms.ContextMenuStrip
 $refresh=$menu.Items.Add('立即刷新');$refresh.Add_Click({Update-Usage})
 $compactItem=New-Object Windows.Forms.ToolStripMenuItem('简洁模式');$compactItem.CheckOnClick=$true;$compactItem.Add_Click({Set-Compact $compactItem.Checked});[void]$menu.Items.Add($compactItem)
-$themes=New-Object Windows.Forms.ToolStripMenuItem('更换外观');foreach($pair in @(@('light','苹果浅色'),@('dark','深色'),@('blue','淡蓝'),@('glass','半透明'))){$item=New-Object Windows.Forms.ToolStripMenuItem($pair[1]);$name=$pair[0];$item.Add_Click([scriptblock]::Create("Set-Theme '$name'"));[void]$themes.DropDownItems.Add($item)};[void]$menu.Items.Add($themes)
+$themes=New-Object Windows.Forms.ToolStripMenuItem('更换外观');foreach($pair in @(@('light','苹果浅色'),@('dark','深色'),@('blue','淡蓝'))){$item=New-Object Windows.Forms.ToolStripMenuItem($pair[1]);$name=$pair[0];$item.Add_Click([scriptblock]::Create("Set-Theme '$name'"));[void]$themes.DropDownItems.Add($item)};[void]$menu.Items.Add($themes)
 $followItem=New-Object Windows.Forms.ToolStripMenuItem('跟随 Codex 显示');$followItem.CheckOnClick=$true;$followItem.Checked=$true;$followItem.Add_Click({$script:follow=$followItem.Checked;Save-Config});[void]$menu.Items.Add($followItem)
 $exit=$menu.Items.Add('退出');$exit.Add_Click({$form.Close()});$form.ContextMenuStrip=$menu
 $drag={$null=[CodexWindows]::ReleaseCapture();$null=[CodexWindows]::SendMessage($form.Handle,0xA1,[IntPtr]2,[IntPtr]0)};foreach($c in @($form,$title,$value,$detail,$track)){$c.Add_MouseDown($drag)}
