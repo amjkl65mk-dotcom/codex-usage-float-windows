@@ -14,7 +14,7 @@ powershell -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create([IO.File]:
 
 ## 自动启动（推荐）
 
-双击 `install_autostart.bat` 一次。安装程序会把运行文件复制到稳定目录 `%LOCALAPPDATA%\CodexUsageFloat`，以后登录 Windows 后会启动一个不可见的轻量监控：
+先完整解压压缩包（不要直接在压缩包预览窗口内运行），再双击 `install_autostart.bat`。安装程序会把运行文件复制到稳定目录 `%LOCALAPPDATA%\CodexUsageFloat`，以后登录 Windows 后会启动一个不可见的轻量监控：
 
 - 切换到 Codex：自动显示用量
 - 切换到其他应用、最小化或关闭 Codex：自动完全隐藏
