@@ -10,18 +10,26 @@ public static class CodexWindowState {
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
     [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hWnd);
     [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hWnd);
+    [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+    static bool IsCodexProcess(uint pid) {
+        try {
+            var name = Process.GetProcessById((int)pid).ProcessName;
+            return name.Equals("Codex", StringComparison.OrdinalIgnoreCase)
+                || name.Equals("ChatGPT", StringComparison.OrdinalIgnoreCase)
+                || name.IndexOf("Codex", StringComparison.OrdinalIgnoreCase) >= 0;
+        } catch { return false; }
+    }
     public static int GetState() {
+        uint foregroundPid;
+        GetWindowThreadProcessId(GetForegroundWindow(), out foregroundPid);
+        bool codexForeground = IsCodexProcess(foregroundPid);
         int state = 0;
         EnumWindows((h, _) => {
             if (!IsWindowVisible(h)) return true;
             uint pid;
             GetWindowThreadProcessId(h, out pid);
             try {
-                var name = Process.GetProcessById((int)pid).ProcessName;
-                bool isCodex = name.Equals("Codex", StringComparison.OrdinalIgnoreCase)
-                    || name.Equals("ChatGPT", StringComparison.OrdinalIgnoreCase)
-                    || name.IndexOf("Codex", StringComparison.OrdinalIgnoreCase) >= 0;
-                if (isCodex) {
+                if (IsCodexProcess(pid)) {
                     if (!IsIconic(h)) state = 2;
                     else if (state == 0) state = 1;
                 }
@@ -33,11 +41,14 @@ public static class CodexWindowState {
                 foreach (var p in Process.GetProcessesByName(name)) {
                     p.Refresh();
                     var h = p.MainWindowHandle;
-                    if (h != IntPtr.Zero && IsWindowVisible(h)) return IsIconic(h) ? 1 : 2;
+                    if (h != IntPtr.Zero && IsWindowVisible(h)) {
+                        state = IsIconic(h) ? 1 : 2;
+                        if (state == 2) break;
+                    }
                 }
             }
         }
-        return state;
+        return (state == 2 && codexForeground) ? 3 : state;
     }
 }
 '@
@@ -163,7 +174,8 @@ function Update-CodexVisibility {
         return
     }
     $state = [CodexWindowState]::GetState()
-    if ($state -eq 2) {
+    $userInteracting = $window.IsMouseOver -or ($null -ne $card.ContextMenu -and $card.ContextMenu.IsOpen)
+    if ($state -eq 3 -or $userInteracting) {
         if (-not $script:CodexVisible) {
             $window.Opacity = 1
             $window.IsHitTestVisible = $true

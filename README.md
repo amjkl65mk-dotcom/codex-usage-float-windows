@@ -16,8 +16,8 @@ powershell -ExecutionPolicy Bypass -Command "& ([ScriptBlock]::Create([IO.File]:
 
 双击 `install_autostart.bat` 一次。以后登录 Windows 后会启动一个不可见的轻量监控：
 
-- 打开或恢复 Codex：自动显示用量
-- 最小化或关闭 Codex：自动完全隐藏
+- 切换到 Codex：自动显示用量
+- 切换到其他应用、最小化或关闭 Codex：自动完全隐藏
 - 再次打开 Codex：自动恢复显示
 
 不再需要每次手动运行。若不再需要，双击 `uninstall_autostart.bat`。
