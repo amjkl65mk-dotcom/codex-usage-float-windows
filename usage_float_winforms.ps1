@@ -16,7 +16,11 @@ public class UsageForm : Form {
 }
 public static class NativeStyle {
     [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr h, int a, ref int v, int s);
+    [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr h, int cmd);
+    [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
     public static void Apply(IntPtr h, int borderColor) { int corner=2; DwmSetWindowAttribute(h,33,ref corner,4); DwmSetWindowAttribute(h,34,ref borderColor,4); }
+    public static void SetVisible(IntPtr h, bool visible) { ShowWindow(h, visible ? 4 : 0); }
+    public static bool Visible(IntPtr h) { return IsWindowVisible(h); }
 }
 public static class CodexWindows {
     delegate bool EnumProc(IntPtr h, IntPtr l);
@@ -35,7 +39,7 @@ public static class CodexWindows {
 
 $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
 $configDir = Join-Path $env:APPDATA 'CodexUsageFloat'; $configFile = Join-Path $configDir 'config.json'
-$script:theme = 'light'; $script:follow = $true; $script:compact = $false; $script:visibleState = $true
+$script:theme = 'light'; $script:follow = $true; $script:compact = $false; $script:visibleState = $true; $script:hideMisses = 0
 
 function Get-LatestUsage {
     $newest=$null; $files=@()
@@ -63,7 +67,18 @@ $form.Controls.AddRange(@($title,$value,$track,$detail))
 function Set-Theme($name){$script:theme=$name;switch($name){'light'{$form.BackColor='#F5F5F7';$title.ForeColor='#6E6E73';$detail.ForeColor='#6E6E73';$track.BackColor='#D2D2D7';[NativeStyle]::Apply($form.Handle,0x00D7D2D2)}'blue'{$form.BackColor='#EDF5FF';$title.ForeColor='#536A86';$detail.ForeColor='#536A86';$track.BackColor='#CADCF2';[NativeStyle]::Apply($form.Handle,0x00F2DCCA)}default{$form.BackColor='#1D1D1F';$title.ForeColor='#A1A1A6';$detail.ForeColor='#A1A1A6';$track.BackColor='#3A3A3C';[NativeStyle]::Apply($form.Handle,0x003C3A3A)}};$form.Opacity=1;$form.Invalidate();Save-Config}
 function Set-Compact([bool]$enabled){$script:compact=$enabled;if($enabled){$title.Visible=$false;$track.Visible=$false;$detail.Visible=$false;$form.Size=New-Object Drawing.Size(58,30);$value.SetBounds(2,1,54,27);$value.TextAlign='MiddleCenter';$value.Font=New-Object Drawing.Font('Segoe UI Variable Display',11,[Drawing.FontStyle]::Bold)}else{$form.Size=New-Object Drawing.Size(132,58);$title.Visible=$true;$track.Visible=$true;$detail.Visible=$true;$value.SetBounds(76,3,47,22);$value.TextAlign='MiddleRight';$value.Font=New-Object Drawing.Font('Segoe UI Variable Display',13,[Drawing.FontStyle]::Bold)};$form.Invalidate();Save-Config}
 function Update-Usage {$u=Get-LatestUsage;if($u){$n=[double]$u.Remaining;$color=if($n -gt 40){'#30A46C'}elseif($n -gt 20){'#E8930C'}else{'#D92D20'};$value.Text=('{0:N0}%' -f $n);$value.ForeColor=$color;$bar.BackColor=$color;$bar.Width=[int](112*$n/100);$title.Text="CODEX $($u.Plan)";if($u.Reset){$reset=[DateTimeOffset]::FromUnixTimeSeconds([long]$u.Reset).LocalDateTime;$span=$reset-[datetime]::Now;if($span.TotalSeconds -lt 0){$span=[timespan]::Zero};$detail.Text=if($span.Days -gt 0){"$($span.Days)天 $($span.Hours)小时后重置"}elseif($span.Hours -gt 0){"$($span.Hours)小时 $($span.Minutes)分后重置"}else{"$($span.Minutes)分钟后重置"}}}else{$value.Text='--%';$detail.Text='请先在 Codex 发送消息'}}
-function Update-Visibility {$interaction=$form.ClientRectangle.Contains($form.PointToClient([Windows.Forms.Cursor]::Position)) -or $menu.Visible;$show=(-not $script:follow) -or (([CodexWindows]::HasVisibleWindow()) -and ([CodexWindows]::IsForeground())) -or $interaction;if($show -ne $script:visibleState){$script:visibleState=$show;if($show){$form.Opacity=1;$form.Enabled=$true;$form.TopMost=$false;$form.TopMost=$true}else{$form.Opacity=0;$form.Enabled=$false}}}
+function Update-Visibility {
+    $interaction=$form.ClientRectangle.Contains($form.PointToClient([Windows.Forms.Cursor]::Position)) -or $menu.Visible
+    $shouldShow=(-not $script:follow) -or (([CodexWindows]::HasVisibleWindow()) -and ([CodexWindows]::IsForeground())) -or $interaction
+    if($shouldShow){
+        $script:hideMisses=0;$script:visibleState=$true
+        if(-not [NativeStyle]::Visible($form.Handle)){[NativeStyle]::SetVisible($form.Handle,$true)}
+        $form.TopMost=$false;$form.TopMost=$true
+    }else{
+        $script:hideMisses++
+        if($script:hideMisses -ge 3 -and [NativeStyle]::Visible($form.Handle)){$script:visibleState=$false;[NativeStyle]::SetVisible($form.Handle,$false)}
+    }
+}
 
 $menu=New-Object Windows.Forms.ContextMenuStrip
 $refresh=$menu.Items.Add('立即刷新');$refresh.Add_Click({Update-Usage})
