@@ -11,7 +11,6 @@ using System.Runtime.InteropServices;
 using System.Windows.Forms;
 public class UsageForm : Form {
     protected override bool ShowWithoutActivation { get { return true; } }
-    protected override CreateParams CreateParams { get { var p=base.CreateParams; p.ExStyle|=0x08000000; return p; } }
     protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); NativeStyle.Apply(Handle, 0x00D7D2D2); }
 }
 public static class NativeStyle {
@@ -31,21 +30,24 @@ public static class CodexWindows {
     [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool ReleaseCapture();
     [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr h,int m,IntPtr w,IntPtr l);
+    [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr h);
     static bool IsCodex(uint pid) { try { var n=Process.GetProcessById((int)pid).ProcessName; return n.Equals("ChatGPT",StringComparison.OrdinalIgnoreCase)||n.IndexOf("Codex",StringComparison.OrdinalIgnoreCase)>=0; } catch { return false; } }
     public static bool IsForeground() { uint p; GetWindowThreadProcessId(GetForegroundWindow(),out p); return IsCodex(p); }
     public static bool HasVisibleWindow() { bool yes=false; EnumWindows((h,l)=>{uint p;GetWindowThreadProcessId(h,out p);if(IsCodex(p)&&IsWindowVisible(h)&&!IsIconic(h)){yes=true;return false;}return true;},IntPtr.Zero);return yes; }
+    public static void Activate() { IntPtr target=IntPtr.Zero; EnumWindows((h,l)=>{uint p;GetWindowThreadProcessId(h,out p);if(IsCodex(p)&&IsWindowVisible(h)&&!IsIconic(h)){target=h;return false;}return true;},IntPtr.Zero);if(target!=IntPtr.Zero)SetForegroundWindow(target); }
 }
 '@
 
 $codexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $env:USERPROFILE '.codex' }
-$configDir = Join-Path $env:APPDATA 'CodexUsageFloat'; $configFile = Join-Path $configDir 'config.json'
+$configDir = Join-Path $env:APPDATA 'CodexUsageFloat'; $configFile = Join-Path $configDir 'config.json'; $logFile = Join-Path $configDir 'monitor.log'
 $script:theme = 'light'; $script:follow = $true; $script:compact = $false; $script:visibleState = $true; $script:hideMisses = 0
+function Write-Log($message){try{New-Item $configDir -ItemType Directory -Force|Out-Null;"$([datetime]::Now.ToString('s')) $message"|Add-Content $logFile -Encoding UTF8}catch{}}
 
 function Get-LatestUsage {
     $newest=$null; $files=@()
     foreach($d in @((Join-Path $codexHome 'sessions'),(Join-Path $codexHome 'archived_sessions'))){if(Test-Path $d){$files+=Get-ChildItem $d -Filter '*.jsonl' -File -Recurse -ErrorAction SilentlyContinue}}
-    foreach($f in ($files|Sort-Object LastWriteTime -Descending|Select-Object -First 40)){
-        $lines=Get-Content $f.FullName -Encoding UTF8 -ErrorAction SilentlyContinue
+    foreach($f in ($files|Sort-Object LastWriteTime -Descending|Select-Object -First 20)){
+        $lines=Get-Content $f.FullName -Encoding UTF8 -Tail 800 -ErrorAction SilentlyContinue
         for($i=$lines.Count-1;$i-ge 0;$i--){
             if($lines[$i] -notmatch '"type":"token_count"' -or $lines[$i] -notmatch '"rate_limits"'){continue}
             try{$r=$lines[$i]|ConvertFrom-Json;$l=$r.payload.rate_limits;if($null -ne $l.primary.used_percent){$when=$f.LastWriteTimeUtc;if($r.timestamp){try{$when=[DateTimeOffset]::Parse($r.timestamp).UtcDateTime}catch{}};$c=[pscustomobject]@{Remaining=[math]::Max(0,[math]::Min(100,100-[double]$l.primary.used_percent));Reset=$l.primary.resets_at;Plan=if($l.plan_type){$l.plan_type.ToString().ToUpper()}else{'CHATGPT'};When=$when};if($null -eq $newest -or $c.When -gt $newest.When){$newest=$c};break}}catch{}
@@ -66,7 +68,7 @@ $form.Controls.AddRange(@($title,$value,$track,$detail))
 
 function Set-Theme($name){$script:theme=$name;switch($name){'light'{$form.BackColor='#F5F5F7';$title.ForeColor='#6E6E73';$detail.ForeColor='#6E6E73';$track.BackColor='#D2D2D7';[NativeStyle]::Apply($form.Handle,0x00D7D2D2)}'blue'{$form.BackColor='#EDF5FF';$title.ForeColor='#536A86';$detail.ForeColor='#536A86';$track.BackColor='#CADCF2';[NativeStyle]::Apply($form.Handle,0x00F2DCCA)}default{$form.BackColor='#1D1D1F';$title.ForeColor='#A1A1A6';$detail.ForeColor='#A1A1A6';$track.BackColor='#3A3A3C';[NativeStyle]::Apply($form.Handle,0x003C3A3A)}};$form.Opacity=1;$form.Invalidate();Save-Config}
 function Set-Compact([bool]$enabled){$script:compact=$enabled;if($enabled){$title.Visible=$false;$track.Visible=$false;$detail.Visible=$false;$form.Size=New-Object Drawing.Size(58,30);$value.SetBounds(2,1,54,27);$value.TextAlign='MiddleCenter';$value.Font=New-Object Drawing.Font('Segoe UI Variable Display',11,[Drawing.FontStyle]::Bold)}else{$form.Size=New-Object Drawing.Size(132,58);$title.Visible=$true;$track.Visible=$true;$detail.Visible=$true;$value.SetBounds(76,3,47,22);$value.TextAlign='MiddleRight';$value.Font=New-Object Drawing.Font('Segoe UI Variable Display',13,[Drawing.FontStyle]::Bold)};$form.Invalidate();Save-Config}
-function Update-Usage {$u=Get-LatestUsage;if($u){$n=[double]$u.Remaining;$color=if($n -gt 40){'#30A46C'}elseif($n -gt 20){'#E8930C'}else{'#D92D20'};$value.Text=('{0:N0}%' -f $n);$value.ForeColor=$color;$bar.BackColor=$color;$bar.Width=[int](112*$n/100);$title.Text="CODEX $($u.Plan)";if($u.Reset){$reset=[DateTimeOffset]::FromUnixTimeSeconds([long]$u.Reset).LocalDateTime;$span=$reset-[datetime]::Now;if($span.TotalSeconds -lt 0){$span=[timespan]::Zero};$detail.Text=if($span.Days -gt 0){"$($span.Days)天 $($span.Hours)小时后重置"}elseif($span.Hours -gt 0){"$($span.Hours)小时 $($span.Minutes)分后重置"}else{"$($span.Minutes)分钟后重置"}}}else{$value.Text='--%';$detail.Text='请先在 Codex 发送消息'}}
+function Update-Usage {try{$u=Get-LatestUsage;if($u){$n=[double]$u.Remaining;$color=if($n -gt 40){'#30A46C'}elseif($n -gt 20){'#E8930C'}else{'#D92D20'};$value.Text=('{0:N0}%' -f $n);$value.ForeColor=$color;$bar.BackColor=$color;$bar.Width=[int](112*$n/100);$title.Text="CODEX $($u.Plan)";if($u.Reset){$reset=[DateTimeOffset]::FromUnixTimeSeconds([long]$u.Reset).LocalDateTime;$span=$reset-[datetime]::Now;if($span.TotalSeconds -lt 0){$span=[timespan]::Zero};$detail.Text=if($span.Days -gt 0){"$($span.Days)天 $($span.Hours)小时后重置"}elseif($span.Hours -gt 0){"$($span.Hours)小时 $($span.Minutes)分后重置"}else{"$($span.Minutes)分钟后重置"}};Write-Log "usage refreshed: remaining=$n observed=$($u.When.ToString('o'))"}else{$value.Text='--%';$detail.Text='请先在 Codex 发送消息'}}catch{Write-Log "refresh error: $($_.Exception.ToString())"}}
 function Update-Visibility {
     $interaction=$form.ClientRectangle.Contains($form.PointToClient([Windows.Forms.Cursor]::Position)) -or $menu.Visible
     $shouldShow=(-not $script:follow) -or (([CodexWindows]::HasVisibleWindow()) -and ([CodexWindows]::IsForeground())) -or $interaction
@@ -86,10 +88,12 @@ $compactItem=New-Object Windows.Forms.ToolStripMenuItem('简洁模式');$compact
 $themes=New-Object Windows.Forms.ToolStripMenuItem('更换外观');foreach($pair in @(@('light','苹果浅色'),@('dark','深色'),@('blue','淡蓝'))){$item=New-Object Windows.Forms.ToolStripMenuItem($pair[1]);$name=$pair[0];$item.Add_Click([scriptblock]::Create("Set-Theme '$name'"));[void]$themes.DropDownItems.Add($item)};[void]$menu.Items.Add($themes)
 $followItem=New-Object Windows.Forms.ToolStripMenuItem('跟随 Codex 显示');$followItem.CheckOnClick=$true;$followItem.Checked=$true;$followItem.Add_Click({$script:follow=$followItem.Checked;Save-Config});[void]$menu.Items.Add($followItem)
 $exit=$menu.Items.Add('退出');$exit.Add_Click({$form.Close()});$form.ContextMenuStrip=$menu
+$menu.Add_Closed({$script:hideMisses=0;[CodexWindows]::Activate()})
 $drag={$null=[CodexWindows]::ReleaseCapture();$null=[CodexWindows]::SendMessage($form.Handle,0xA1,[IntPtr]2,[IntPtr]0)};foreach($c in @($form,$title,$value,$detail,$track)){$c.Add_MouseDown($drag)}
 $form.Add_DoubleClick({Set-Compact (-not $script:compact)});$value.Add_DoubleClick({Set-Compact (-not $script:compact)})
 $form.Add_Move({Save-Config});$form.Add_FormClosed({Save-Config;if($script:MutexCreated){$script:AppMutex.ReleaseMutex()}})
 $config=Read-Config;$form.Left=[int]$config.x;$form.Top=[int]$config.y;if($config.theme){$script:theme=$config.theme};if($null -ne $config.followCodex){$script:follow=[bool]$config.followCodex;$followItem.Checked=$script:follow};if($null -ne $config.compact){$script:compact=[bool]$config.compact};Set-Theme $script:theme;Set-Compact $script:compact;$compactItem.Checked=$script:compact;Update-Usage
 $usageTimer=New-Object Windows.Forms.Timer;$usageTimer.Interval=30000;$usageTimer.Add_Tick({Update-Usage});$usageTimer.Start()
 $visibilityTimer=New-Object Windows.Forms.Timer;$visibilityTimer.Interval=400;$visibilityTimer.Add_Tick({Update-Visibility});$visibilityTimer.Start()
-[Windows.Forms.Application]::Run($form)
+[Windows.Forms.Application]::add_ThreadException({param($sender,$eventArgs) Write-Log "UI error: $($eventArgs.Exception.ToString())"})
+try{Write-Log 'monitor started';[Windows.Forms.Application]::Run($form)}catch{Write-Log "fatal error: $($_.Exception.ToString())"}
