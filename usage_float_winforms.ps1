@@ -7,7 +7,9 @@ Add-Type -ReferencedAssemblies System.Windows.Forms,System.Drawing @'
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Windows.Forms;
 public class UsageForm : Form {
     protected override bool ShowWithoutActivation { get { return true; } }
@@ -20,6 +22,14 @@ public static class NativeStyle {
     public static void Apply(IntPtr h, int borderColor) { int corner=2; DwmSetWindowAttribute(h,33,ref corner,4); DwmSetWindowAttribute(h,34,ref borderColor,4); }
     public static void SetVisible(IntPtr h, bool visible) { ShowWindow(h, visible ? 4 : 0); }
     public static bool Visible(IntPtr h) { return IsWindowVisible(h); }
+}
+public static class LogTail {
+    public static string[] Read(string path, int maxBytes) {
+        using(var fs=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.ReadWrite|FileShare.Delete)) {
+            long start=Math.Max(0,fs.Length-maxBytes);fs.Seek(start,SeekOrigin.Begin);
+            using(var sr=new StreamReader(fs,Encoding.UTF8,true)) { var text=sr.ReadToEnd(); return text.Split(new[]{"\r\n","\n"},StringSplitOptions.RemoveEmptyEntries); }
+        }
+    }
 }
 public static class CodexWindows {
     delegate bool EnumProc(IntPtr h, IntPtr l);
@@ -46,8 +56,8 @@ function Write-Log($message){try{New-Item $configDir -ItemType Directory -Force|
 function Get-LatestUsage {
     $newest=$null; $files=@()
     foreach($d in @((Join-Path $codexHome 'sessions'),(Join-Path $codexHome 'archived_sessions'))){if(Test-Path $d){$files+=Get-ChildItem $d -Filter '*.jsonl' -File -Recurse -ErrorAction SilentlyContinue}}
-    foreach($f in ($files|Sort-Object LastWriteTime -Descending|Select-Object -First 20)){
-        $lines=Get-Content $f.FullName -Encoding UTF8 -Tail 800 -ErrorAction SilentlyContinue
+    foreach($f in ($files|Sort-Object LastWriteTime -Descending|Select-Object -First 10)){
+        try{$lines=[LogTail]::Read($f.FullName,262144)}catch{continue}
         for($i=$lines.Count-1;$i-ge 0;$i--){
             if($lines[$i] -notmatch '"type":"token_count"' -or $lines[$i] -notmatch '"rate_limits"'){continue}
             try{$r=$lines[$i]|ConvertFrom-Json;$l=$r.payload.rate_limits;if($null -ne $l.primary.used_percent){$when=$f.LastWriteTimeUtc;if($r.timestamp){try{$when=[DateTimeOffset]::Parse($r.timestamp).UtcDateTime}catch{}};$c=[pscustomobject]@{Remaining=[math]::Max(0,[math]::Min(100,100-[double]$l.primary.used_percent));Reset=$l.primary.resets_at;Plan=if($l.plan_type){$l.plan_type.ToString().ToUpper()}else{'CHATGPT'};When=$when};if($null -eq $newest -or $c.When -gt $newest.When){$newest=$c};break}}catch{}
@@ -74,8 +84,7 @@ function Update-Visibility {
     $shouldShow=(-not $script:follow) -or (([CodexWindows]::HasVisibleWindow()) -and ([CodexWindows]::IsForeground())) -or $interaction
     if($shouldShow){
         $script:hideMisses=0;$script:visibleState=$true
-        if(-not [NativeStyle]::Visible($form.Handle)){[NativeStyle]::SetVisible($form.Handle,$true)}
-        $form.TopMost=$false;$form.TopMost=$true
+        if(-not [NativeStyle]::Visible($form.Handle)){[NativeStyle]::SetVisible($form.Handle,$true);$form.TopMost=$false;$form.TopMost=$true}
     }else{
         $script:hideMisses++
         if($script:hideMisses -ge 3 -and [NativeStyle]::Visible($form.Handle)){$script:visibleState=$false;[NativeStyle]::SetVisible($form.Handle,$false)}
