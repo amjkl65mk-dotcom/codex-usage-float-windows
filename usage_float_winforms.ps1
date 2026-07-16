@@ -56,8 +56,8 @@ function Write-Log($message){try{New-Item $configDir -ItemType Directory -Force|
 function Get-LatestUsage {
     $newest=$null; $files=@()
     foreach($d in @((Join-Path $codexHome 'sessions'),(Join-Path $codexHome 'archived_sessions'))){if(Test-Path $d){$files+=Get-ChildItem $d -Filter '*.jsonl' -File -Recurse -ErrorAction SilentlyContinue}}
-    foreach($f in ($files|Sort-Object LastWriteTime -Descending|Select-Object -First 10)){
-        try{$lines=[LogTail]::Read($f.FullName,262144)}catch{continue}
+    foreach($f in ($files|Sort-Object LastWriteTime -Descending|Select-Object -First 5)){
+        try{$lines=[LogTail]::Read($f.FullName,131072)}catch{continue}
         for($i=$lines.Count-1;$i-ge 0;$i--){
             if($lines[$i] -notmatch '"type":"token_count"' -or $lines[$i] -notmatch '"rate_limits"'){continue}
             try{$r=$lines[$i]|ConvertFrom-Json;$l=$r.payload.rate_limits;if($null -ne $l.primary.used_percent){$when=$f.LastWriteTimeUtc;if($r.timestamp){try{$when=[DateTimeOffset]::Parse($r.timestamp).UtcDateTime}catch{}};$c=[pscustomobject]@{Remaining=[math]::Max(0,[math]::Min(100,100-[double]$l.primary.used_percent));Reset=$l.primary.resets_at;Plan=if($l.plan_type){$l.plan_type.ToString().ToUpper()}else{'CHATGPT'};When=$when};if($null -eq $newest -or $c.When -gt $newest.When){$newest=$c};break}}catch{}
@@ -81,10 +81,10 @@ function Set-Compact([bool]$enabled){$script:compact=$enabled;if($enabled){$titl
 function Update-Usage {try{$u=Get-LatestUsage;if($u){$n=[double]$u.Remaining;$color=if($n -gt 40){'#30A46C'}elseif($n -gt 20){'#E8930C'}else{'#D92D20'};$value.Text=('{0:N0}%' -f $n);$value.ForeColor=$color;$bar.BackColor=$color;$bar.Width=[int](112*$n/100);$title.Text="CODEX $($u.Plan)";if($u.Reset){$reset=[DateTimeOffset]::FromUnixTimeSeconds([long]$u.Reset).LocalDateTime;$span=$reset-[datetime]::Now;if($span.TotalSeconds -lt 0){$span=[timespan]::Zero};$detail.Text=if($span.Days -gt 0){"$($span.Days)天 $($span.Hours)小时后重置"}elseif($span.Hours -gt 0){"$($span.Hours)小时 $($span.Minutes)分后重置"}else{"$($span.Minutes)分钟后重置"}};Write-Log "usage refreshed: remaining=$n observed=$($u.When.ToString('o'))"}else{$value.Text='--%';$detail.Text='请先在 Codex 发送消息'}}catch{Write-Log "refresh error: $($_.Exception.ToString())"}}
 function Update-Visibility {
     $interaction=$form.ClientRectangle.Contains($form.PointToClient([Windows.Forms.Cursor]::Position)) -or $menu.Visible
-    $shouldShow=(-not $script:follow) -or (([CodexWindows]::HasVisibleWindow()) -and ([CodexWindows]::IsForeground())) -or $interaction
+    $shouldShow=(-not $script:follow) -or ([CodexWindows]::IsForeground()) -or $interaction
     if($shouldShow){
-        $script:hideMisses=0;$script:visibleState=$true
-        if(-not [NativeStyle]::Visible($form.Handle)){[NativeStyle]::SetVisible($form.Handle,$true);$form.TopMost=$false;$form.TopMost=$true}
+        $script:hideMisses=0
+        if(-not $script:visibleState){$script:visibleState=$true;[NativeStyle]::SetVisible($form.Handle,$true);$form.TopMost=$false;$form.TopMost=$true}
     }else{
         $script:hideMisses++
         if($script:hideMisses -ge 3 -and [NativeStyle]::Visible($form.Handle)){$script:visibleState=$false;[NativeStyle]::SetVisible($form.Handle,$false)}
@@ -103,6 +103,6 @@ $form.Add_DoubleClick({Set-Compact (-not $script:compact)});$value.Add_DoubleCli
 $form.Add_Move({Save-Config});$form.Add_FormClosed({Save-Config;if($script:MutexCreated){$script:AppMutex.ReleaseMutex()}})
 $config=Read-Config;$form.Left=[int]$config.x;$form.Top=[int]$config.y;if($config.theme){$script:theme=$config.theme};if($null -ne $config.followCodex){$script:follow=[bool]$config.followCodex;$followItem.Checked=$script:follow};if($null -ne $config.compact){$script:compact=[bool]$config.compact};Set-Theme $script:theme;Set-Compact $script:compact;$compactItem.Checked=$script:compact;Update-Usage
 $usageTimer=New-Object Windows.Forms.Timer;$usageTimer.Interval=30000;$usageTimer.Add_Tick({Update-Usage});$usageTimer.Start()
-$visibilityTimer=New-Object Windows.Forms.Timer;$visibilityTimer.Interval=400;$visibilityTimer.Add_Tick({Update-Visibility});$visibilityTimer.Start()
+$visibilityTimer=New-Object Windows.Forms.Timer;$visibilityTimer.Interval=750;$visibilityTimer.Add_Tick({Update-Visibility});$visibilityTimer.Start()
 [Windows.Forms.Application]::add_ThreadException({param($sender,$eventArgs) Write-Log "UI error: $($eventArgs.Exception.ToString())"})
 try{Write-Log 'monitor started';[Windows.Forms.Application]::Run($form)}catch{Write-Log "fatal error: $($_.Exception.ToString())"}
